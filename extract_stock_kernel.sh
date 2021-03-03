@@ -22,7 +22,6 @@
 # These variables are filled with arguments coming from outside world
 DEST_DIR=
 SRC_FILE=
-DEV_NAME=
 
 
 # These variables are filled in this script
@@ -32,6 +31,9 @@ SRC_VERSION=
 
 # Device model, extracted from source file name. Example: SM-G950F for Galaxy S8 exynos
 DEV_MODEL=
+
+# Device name, extracted from DEV_MODEL. Example: G950F
+DEV_NAME=
 
 # Android version, extracted from source file name. Example: PP for Android Pie
 ANDROID_VERSION=
@@ -67,7 +69,6 @@ function show_usage (){
     echo "                           Example: SM-G950F_PP_Opensource_G950FXXS7DTA6.zip"
     echo "                           The source file will be extracted in a temp directory and its contents will be copied into destination directory,"
     echo "                           then a cleanup will be performed."
-    echo " -dn|--dnam STRING       Device name G950F for the Galaxy S8 exynos."
     echo " -h|--help               Print help"
 
     return 0
@@ -117,7 +118,9 @@ function parse_src_file_name(){
 
     SRC_VERSION=${src_file_token[3]%.*}
     DEV_MODEL=${src_file_token[0]}
+    DEV_NAME=${DEV_MODEL:3}
     ANDROID_VERSION=${src_file_token[1]}
+    echo "SRC_VERSION=$SRC_VERSION DEV_MODEL=$DEV_MODEL DEV_NAME=$DEV_NAME ANDROID_VERSION=$ANDROID_VERSION"
 
     # restore IFS
     IFS=$old_IFS
@@ -199,11 +202,6 @@ function check_args(){
         echo "Source file '$SRC_FILE' doesn't exist."
         exit 1
     fi
-
-    if [ -z "$DEV_NAME" ]; then
-        echo "Device name not specified, taking 'G950F' as default."
-        DEV_NAME="G950F"
-    fi
 }
 
 
@@ -212,14 +210,6 @@ function parse_args(){
         #echo "parse_args: parsing $1"
 
         case "$1" in
-        --dnam|-dn)
-            local next_token=$2
-            if [ "${next_token:0:1}" != "-" ]; then
-                DEV_NAME=$2
-                shift
-            fi
-            ;;
-
         --dest|-d)
             shift
             DEST_DIR=$1
