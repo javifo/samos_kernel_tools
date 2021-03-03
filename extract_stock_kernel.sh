@@ -22,7 +22,6 @@
 # These variables are filled with arguments coming from outside world
 DEST_DIR=
 SRC_FILE=
-SRC_PREFIX=
 DEV_NAME=
 
 
@@ -68,8 +67,6 @@ function show_usage (){
     echo "                           Example: SM-G950F_PP_Opensource_G950FXXS7DTA6.zip"
     echo "                           The source file will be extracted in a temp directory and its contents will be copied into destination directory,"
     echo "                           then a cleanup will be performed."
-    echo " -ps|--prefsrc           Prefix part of the source file name. In the example for the source file above, the prefix would be"
-    echo "                           SM-G950F_PP_Opensource_" 
     echo " -dn|--dnam STRING       Device name G950F for the Galaxy S8 exynos."
     echo " -h|--help               Print help"
 
@@ -203,11 +200,6 @@ function check_args(){
         exit 1
     fi
 
-    if [ -z "$SRC_PREFIX" ]; then
-        echo "Prefix for source file name not specified, taking 'SM-G950F_PP_Opensource_' as default."
-        SRC_PREFIX="SM-G950F_PP_Opensource_"
-    fi
-
     if [ -z "$DEV_NAME" ]; then
         echo "Device name not specified, taking 'G950F' as default."
         DEV_NAME="G950F"
@@ -236,11 +228,6 @@ function parse_args(){
         --src|-s)
             shift
             SRC_FILE=$1
-            ;;
-
-        --prefsrc|-ps)
-            shift
-            SRC_PREFIX=$1
             ;;
 
         *)
