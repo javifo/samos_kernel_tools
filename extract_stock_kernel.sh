@@ -75,29 +75,6 @@ function show_usage (){
 }
 
 
-function extract_kernel_version(){
-    local MAKEFILE=$KERNEL_SRC_DIR/Makefile
-
-    if [ ! -f "$MAKEFILE" ]; then
-        echo "'$MAKEFILE' not found"
-        exit 1
-    fi
-
-    local kernel_ver_aux=`cat $MAKEFILE | grep "SUBLEVEL = " -B2`
-    #echo "kernel_ver_aux=$kernel_ver_aux"
-    local kernel_ver_token=( $kernel_ver_aux )
-
-    KERNEL_VERSION=${kernel_ver_token[2]}
-    KERNEL_PATCHLEVEL=${kernel_ver_token[5]}
-    KERNEL_SUBLEVEL=${kernel_ver_token[8]}
-
-    KERNEL_VERSION_STR=$KERNEL_VERSION.$KERNEL_PATCHLEVEL
-
-    #echo "KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL   KERNEL_VERSION_STR=$KERNEL_VERSION_STR"
-}
-
-
-
 function parse_src_file_name(){
     # Samsung files are usually named 'SM-G950F_PP_Opensource.zip' but we request our users to append the version before the zip extension.
     # So we expect the file to be named so: SM-G950F_PP_Opensource_G950FXXS7DTA6.zip
@@ -124,6 +101,28 @@ function parse_src_file_name(){
 
     # restore IFS
     IFS=$old_IFS
+}
+
+
+function extract_kernel_version(){
+    local MAKEFILE=$KERNEL_SRC_DIR/Makefile
+
+    if [ ! -f "$MAKEFILE" ]; then
+        echo "'$MAKEFILE' not found"
+        exit 1
+    fi
+
+    local kernel_ver_aux=`cat $MAKEFILE | grep "SUBLEVEL = " -B2`
+    #echo "kernel_ver_aux=$kernel_ver_aux"
+    local kernel_ver_token=( $kernel_ver_aux )
+
+    KERNEL_VERSION=${kernel_ver_token[2]}
+    KERNEL_PATCHLEVEL=${kernel_ver_token[5]}
+    KERNEL_SUBLEVEL=${kernel_ver_token[8]}
+
+    KERNEL_VERSION_STR=$KERNEL_VERSION.$KERNEL_PATCHLEVEL
+
+    #echo "KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL   KERNEL_VERSION_STR=$KERNEL_VERSION_STR"
 }
 
 
@@ -176,7 +175,6 @@ function extract_src (){
 
 function kernel_src_cleanup(){
     rm -rf $KERNEL_SRC_DIR/toolchain
-    rm -rf $KERNEL_SRC_DIR/android
 }
 
 
@@ -252,6 +250,38 @@ function clone_upstream_kernel(){
 }
 
 
+function clone_android_kernel(){
+    local suffix=
+
+    case "$ANDROID_VERSION" in
+        OO)
+            suffix="o"
+            ;;
+        PP)
+            suffix="p"
+            ;;
+
+        QQ)
+            suffix="q"
+            ;;
+
+        RR)
+            suffix="stable"
+            ;;
+
+        *)
+            echo "clone_android_kernel: unrecognized ANDROID_VERSION='$ANDROID_VERSION'"
+            exit 1
+            ;;
+    esac
+
+    local kernel_branch=android-$KERNEL_VERSION_STR-$suffix
+
+    #echo "kernel_branch=$kernel_branch"
+    git clone -b $kernel_branch --single-branch https://android.googlesource.com/kernel/common $DEST_DIR
+}
+
+
 function detect_git_repo(){
     cd $DEST_DIR
 
@@ -291,7 +321,7 @@ function check_4_sammy_kernel_merged(){
 }
 
 
-function git_work(){
+function git_work_linux(){
     detect_git_repo
 
     if [ "$DEST_DIR_HAS_REPO" = true ] && [ "$DEST_DIR_REPO_IS_CLEAN" = true ]; then
@@ -326,6 +356,52 @@ function git_work(){
     fi
 }
 
+
+function git_work_android(){
+    detect_git_repo
+
+    if [ "$DEST_DIR_HAS_REPO" = true ] && [ "$DEST_DIR_REPO_IS_CLEAN" = true ]; then
+        # Check whether we've already merged Sammy code before
+        check_4_sammy_kernel_merged
+
+        cd $DEST_DIR
+
+        echo "SAMMY_KERNEL_MERGED=$SAMMY_KERNEL_MERGED"
+        if [ "$SAMMY_KERNEL_MERGED" = false ]; then
+            # Search for commit with same kernel version
+            local log_out=$(git log --oneline | grep "Merge.*$KERNEL_VERSION.$KERNEL_PATCHLEVEL.$KERNEL_SUBLEVEL.*into")
+            local log_out_token=( $log_out )
+            local commit=${log_out_token[0]}
+
+            if [ -z commit ]; then
+                echo "git_work_android: No commit found for $KERNEL_VERSION.$KERNEL_PATCHLEVEL.$KERNEL_SUBLEVEL"
+                exit 1
+            fi
+
+            # Checkout to same tag as kernel version has and create a branch for this sammy version
+            git checkout $commit
+            git checkout -b $SRC_VERSION
+        else
+            # Just create a branch on top of last sammy version
+            git checkout $SAMMY_LAST_VER
+            git checkout -b $SRC_VERSION
+        fi
+
+        # remove things from KERNEL_SRC_DIR (like toolchain) that we don't want to copy to our kernel repo
+        kernel_src_cleanup
+
+        rm -rf $DEST_DIR/*
+        cp -R $KERNEL_SRC_DIR/* $DEST_DIR
+
+        git add *
+
+        local git_commit_out=$(git commit -m "Merge $SRC_VERSION")
+
+        PERMISSION_2_FIX_AUX=$(echo "$git_commit_out" | grep "mode change")
+        #echo "PERMISSION_2_FIX_AUX=$PERMISSION_2_FIX_AUX"
+        #echo "git_commit_out=$git_commit_out"
+    fi
+}
 
 
 function fix_permissions(){
@@ -384,9 +460,9 @@ extract_src
 dest_dir_is_empty
 
 if [ "$DEST_DIR_EMPTY" = true ]; then
-    clone_upstream_kernel
+    clone_android_kernel
 fi
 
-git_work
+git_work_android
 
 fix_permissions
