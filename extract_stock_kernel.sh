@@ -25,8 +25,18 @@ SRC_FILE=
 SRC_PREFIX=
 DEV_NAME=
 
+
 # These variables are filled in this script
+
+# Source code version, extracted from source file name
 SRC_VERSION=
+
+# Device model, extracted from source file name. Example: SM-G950F for Galaxy S8 exynos
+DEV_MODEL=
+
+# Android version, extracted from source file name. Example: PP for Android Pie
+ANDROID_VERSION=
+
 TMP_DIR=
 KERNEL_SRC_DIR=
 KERNEL_VERSION=
@@ -89,17 +99,36 @@ function extract_kernel_version(){
 }
 
 
-# Function extract_src() extract sources in /tmp , searches for kernel version and places it into ...
-function extract_src (){
+
+function parse_src_file_name(){
+    # Samsung files are usually named 'SM-G950F_PP_Opensource.zip' but we request our users to append the version before the zip extension.
+    # So we expect the file to be named so: SM-G950F_PP_Opensource_G950FXXS7DTA6.zip
+
     # Separate path from SRC_FILE
     local src_file_name=${SRC_FILE##*/}
 
-    # Extract VERSION from source file name for a later use
-    SRC_VERSION=${src_file_name/$SRC_PREFIX}
+    local old_IFS=$IFS
+    IFS='_'
+    local src_file_token=( $src_file_name )
+    #echo "0=${src_file_token[0]} 1=${src_file_token[1]} 2=${src_file_token[2]} 3=${src_file_token[3]}"
 
-    # Remove the .zip extension remaining from file name
-    SRC_VERSION=${SRC_VERSION%.*}
+    # Consistency check
+    if [ "${src_file_token[2]}" != "Opensource" ]; then
+        echo "parse_src_file_name: File name mismatch!"
+        exit 1
+    fi
 
+    SRC_VERSION=${src_file_token[3]%.*}
+    DEV_MODEL=${src_file_token[0]}
+    ANDROID_VERSION=${src_file_token[1]}
+
+    # restore IFS
+    IFS=$old_IFS
+}
+
+
+# Function extract_src() extract sources in /tmp , searches for kernel version and places it into ...
+function extract_src (){
     TMP_DIR=`mktemp -d -t sammy-XXX`
 
     echo "Creating temp dir '$TMP_DIR'"
@@ -373,6 +402,7 @@ function fix_permissions(){
 
 parse_args "$@"
 check_args "$@"
+parse_src_file_name
 extract_src
 dest_dir_is_empty
 
