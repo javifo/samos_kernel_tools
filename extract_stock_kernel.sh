@@ -22,6 +22,7 @@
 # These variables are filled with arguments coming from outside world
 DEST_DIR=
 SRC_FILE=
+JOB_NO=8
 
 
 # These variables are filled in this script
@@ -69,6 +70,7 @@ function show_usage (){
     echo "                           Example: SM-G950F_PP_Opensource_G950FXXS7DTA6.zip"
     echo "                           The source file will be extracted in a temp directory and its contents will be copied into destination directory,"
     echo "                           then a cleanup will be performed."
+    echo " -j|--jobs JOBS          Specifies the number of jobs for fixing permissions."
     echo " -h|--help               Print help"
 
     return 0
@@ -200,6 +202,14 @@ function check_args(){
         echo "Source file '$SRC_FILE' doesn't exist."
         exit 1
     fi
+
+    case $JOB_NO in
+        ''|*[!0-9]*)
+            echo "Bad number of jobs! Taking 1 as default!"
+            JOB_NO=1
+            ;;
+        *) ;;
+    esac
 }
 
 
@@ -216,6 +226,11 @@ function parse_args(){
         --src|-s)
             shift
             SRC_FILE=$1
+            ;;
+
+        --jobs|-j)
+            shift
+            JOB_NO=$1
             ;;
 
         *)
@@ -404,6 +419,8 @@ function git_work_android(){
 }
 
 
+PERM_TOKENS_PER_LINE=6
+
 function fix_permissions(){
     if [ ! -z PERMISSION_2_FIX_AUX ]; then
         cd $DEST_DIR
@@ -411,7 +428,7 @@ function fix_permissions(){
         local perm_token=( $PERMISSION_2_FIX_AUX )
         local progress=0
 
-        for (( n=0; n < ${#perm_token[*]}; n=n+6))
+        for (( n=0; n < ${#perm_token[*]}; n=n+$PERM_TOKENS_PER_LINE))
         do
             local file=${perm_token[n+5]}
             local perm=${perm_token[n+2]:3}
@@ -453,6 +470,118 @@ function fix_permissions(){
 }
 
 
+function align(){
+    local value=$1
+    local base=$2
+    local result=$(( ((($value) + (($base) - 1)) & ~(($base) - 1)) ))
+    return $result
+}
+
+
+function fix_permissions_parallel(){
+    local first_token=$1
+    local first_token_orig=$1
+    local last_token=$2
+
+    if (( $first_token > $PERM_TOKENS_PER_LINE )); then
+        first_token=$(( $first_token - $PERM_TOKENS_PER_LINE )) #allow overlapping to not miss some file
+    fi
+
+    #adjust line begin
+    for (( n=$first_token; (n < $last_token) && (n < ${#perm_token[*]} ) ; n=n+1))
+    do
+        #echo "parallel: perm_token[$n]=${perm_token[n]}"
+        if [ "${perm_token[n]}" = "mode" ]; then
+            break;
+        fi
+    done
+    first_token=$n
+
+    #echo "parallel: first_token=$first_token($first_token_orig) last_token=$last_token"
+
+    for (( n=$first_token; (n < $last_token) && (n < ${#perm_token[*]} ) ; n=n+$PERM_TOKENS_PER_LINE))
+    do
+        local file=${perm_token[n+5]}
+        local perm=${perm_token[n+2]:3}
+        #echo "file=$file perm=$perm"
+
+        if [ -f "$file" ]; then
+            chmod $perm $file
+        else
+            # Found following git commit output from git_work()
+            # mode change 100644 => 100755 net/ncm/Kconfig
+            # mode change 100644 => 100755 net/ncm/Makefile
+            # rewrite net/ncm/ncm.c (86%)
+            # mode change 100644 => 100755
+            # mode change 100644 => 100755 net/netfilter/Kconfig
+            # mode change 100644 => 100755 net/netfilter/Makefile
+
+            # So we should recover the n value and continue
+            if [ "${perm_token[n]}" = "mode" ] && 
+               [ "${perm_token[n+1]}" = "change" ] && 
+               [ "${perm_token[n+3]}" = "=>" ] && 
+               [ "$file" = "mode" ]; then
+                ((--n))
+                continue
+            fi
+        fi
+
+        local progress=$(( n * 100 / ${#perm_token[*]} ))
+        echo -ne "Fixing permissions: $progress%"\\r
+    done
+}
+
+
+function fix_permissions_start(){
+    if [ ! -z PERMISSION_2_FIX_AUX ]; then
+        cd $DEST_DIR
+
+        local perm_token=( $PERMISSION_2_FIX_AUX )
+        local progress=0
+
+        # Don't run in parallel when it is not worth
+        if (( ${#perm_token[*]} <= (20 * $PERM_TOKENS_PER_LINE) )); then
+            fix_permissions
+            return
+        fi
+
+        # divide number of tokens into JOB_NO*2 parts, in order to be able to report some progress
+        local pkg_size=0
+        pkg_size=$(( ( ${#perm_token[*]} / ($JOB_NO*2) ) + 1 ))
+        echo "number of tokens=${#perm_token[*]} pkg_size=$pkg_size"
+
+        local first_token=0
+
+        local started_jobs=0
+
+        for (( i=0; i < ($JOB_NO*2); i=i+1 ))
+        do
+            local last_token=$(( $first_token + $pkg_size - 1 ))
+            #echo "i=$i first_token=$first_token last_token=$last_token"
+
+            # start parallel task
+            fix_permissions_parallel $first_token $last_token &
+            started_jobs=$(( $started_jobs + 1 ))
+
+            if (( $started_jobs == $JOB_NO )); then
+                echo "waiting for now..."
+                wait
+                echo "continuing..."
+            fi
+
+            first_token=$(( $last_token + 1 ))
+        done
+
+        wait
+        echo "Fixing permisions: done"
+
+#       TODO: check git status output
+            echo "Merging permission restoration"
+            git commit -a --amend -m "Merge $SRC_VERSION"
+    fi
+}
+
+
 parse_args "$@"
 check_args "$@"
 parse_src_file_name
@@ -465,4 +594,4 @@ fi
 
 git_work_android
 
-fix_permissions
+fix_permissions_start
